@@ -51,11 +51,11 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage
 
-# 复制 package.json 和 package-lock.json（如果存在）
-COPY package*.json ./
+# 复制 package.json 和 package-lock.json
+COPY package.json package-lock.json ./
 
 # 安装项目依赖
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # 复制项目文件
 COPY . .
