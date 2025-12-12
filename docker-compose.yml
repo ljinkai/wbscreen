@@ -1,0 +1,48 @@
+# Docker Compose 配置文件
+# 注意：Docker Compose v2 不再需要 version 字段
+
+services:
+  wbscreen:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wbscreen
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # Puppeteer 配置
+      - PUPPETEER_HEADLESS=true
+      - PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox
+      # 性能配置
+      - MAX_CONCURRENT_REQUESTS=5
+      - BROWSER_POOL_SIZE=3
+      - REQUEST_TIMEOUT=30000
+      # 七牛云配置（从 .env 文件读取，或在这里设置）
+      - QINIU_ACCESS_KEY=${QINIU_ACCESS_KEY:-}
+      - QINIU_SECRET_KEY=${QINIU_SECRET_KEY:-}
+      - QINIU_BUCKET=${QINIU_BUCKET:-static}
+      - QINIU_DOMAIN=${QINIU_DOMAIN:-}
+      - QINIU_ZONE=${QINIU_ZONE:-Zone_z0}
+      - QINIU_AUTO_UPLOAD=${QINIU_AUTO_UPLOAD:-true}
+    # 或者使用 env_file 从 .env 文件加载
+    # env_file:
+    #   - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    # 资源限制（可选）
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+

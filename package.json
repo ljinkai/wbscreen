@@ -1,0 +1,32 @@
+{
+  "name": "wbscreen",
+  "version": "1.0.0",
+  "description": "网页截图服务 - 基于 Node.js 的服务端网页截图 API",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "screenshot",
+    "puppeteer",
+    "web-scraping",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "puppeteer": "^24.15.0",
+    "qiniu": "^7.8.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
+
