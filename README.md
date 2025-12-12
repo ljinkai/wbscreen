@@ -44,6 +44,7 @@ npm start
 
 ```bash
 curl -X POST http://localhost:3000/api/screenshot \
+  -H "x-wb-c: 1024" \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://example.com"

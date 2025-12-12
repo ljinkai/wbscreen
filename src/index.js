@@ -26,6 +26,21 @@ app.use((req, res, next) => {
   next();
 });
 
+// API 权限验证中间件
+app.use('/api', (req, res, next) => {
+  const authHeader = req.headers['x-wb-c'];
+  
+  if (!authHeader || authHeader !== '1024') {
+    return res.status(403).json({
+      error: true,
+      message: 'no permission',
+      code: 'PERMISSION_DENIED',
+    });
+  }
+  
+  next();
+});
+
 // 路由
 app.use('/api', screenshotRoutes);
 
