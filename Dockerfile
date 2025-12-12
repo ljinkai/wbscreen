@@ -4,11 +4,12 @@ FROM node:22-slim
 # 设置工作目录
 WORKDIR /app
 
-# 安装 Puppeteer 所需的系统依赖
+# 安装 Puppeteer 所需的系统依赖和中文字体
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-sandbox \
     fonts-liberation \
+    fonts-noto-cjk \
     libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -44,7 +45,8 @@ RUN apt-get update && apt-get install -y \
     lsb-release \
     wget \
     xdg-utils \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -fv
 
 # 设置 Puppeteer 使用系统安装的 Chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
