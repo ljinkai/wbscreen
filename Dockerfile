@@ -54,8 +54,8 @@ ENV PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage
 # 复制 package.json 和 package-lock.json
 COPY package.json package-lock.json ./
 
-# 安装项目依赖
-RUN npm ci --omit=dev && npm cache clean --force
+# 验证文件已复制并安装项目依赖
+RUN ls -la package*.json && npm ci --omit=dev && npm cache clean --force
 
 # 复制项目文件
 COPY . .

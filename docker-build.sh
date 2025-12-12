@@ -20,7 +20,12 @@ fi
 
 # 构建镜像
 echo "开始构建镜像..."
-docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+if [ "$2" == "--no-cache" ]; then
+    echo "使用 --no-cache 选项，清理构建缓存..."
+    docker build --no-cache -t ${IMAGE_NAME}:${IMAGE_TAG} .
+else
+    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+fi
 
 echo ""
 echo "=========================================="
