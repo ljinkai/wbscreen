@@ -37,7 +37,15 @@ function generateUploadToken() {
 function generateFileName(format) {
   const timestamp = Date.now();
   const random = crypto.randomBytes(8).toString('hex');
-  const extension = format.toLowerCase() === 'jpeg' ? 'jpg' : 'png';
+  const normalized = (format || 'png').toLowerCase();
+  const extension =
+    normalized === 'jpeg' || normalized === 'jpg'
+      ? 'jpg'
+      : normalized === 'gif'
+        ? 'gif'
+        : normalized === 'webp'
+          ? 'webp'
+          : 'png';
   return `screenshots/${timestamp}_${random}.${extension}`;
 }
 

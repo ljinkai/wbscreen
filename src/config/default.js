@@ -39,6 +39,11 @@ module.exports = {
       : [],
   },
   
+  // GitHub API（可选，提高 README 接口限额）
+  github: {
+    token: process.env.GITHUB_TOKEN || '',
+  },
+
   // 七牛云配置
   qiniu: {
     accessKey: process.env.QINIU_ACCESS_KEY || '',

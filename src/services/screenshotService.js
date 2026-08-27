@@ -5,6 +5,7 @@ const puppeteer = require('puppeteer');
 const config = require('../config/default');
 const { AppError } = require('../utils/errorHandler');
 const qiniuService = require('./qiniuService');
+const githubReadmeImage = require('./githubReadmeImage');
 
 class BrowserPool {
   constructor() {
@@ -89,6 +90,22 @@ let activeRequests = 0;
 const maxConcurrentRequests = config.performance.maxConcurrentRequests;
 
 /**
+ * 若启用七牛自动上传，将 buffer 写入 result
+ */
+async function attachQiniuUpload(result) {
+  if (config.qiniu.autoUpload && config.qiniu.accessKey && config.qiniu.secretKey) {
+    try {
+      const uploadResult = await qiniuService.uploadToQiniu(result.buffer, result.format);
+      result.qiniu = uploadResult;
+    } catch (error) {
+      console.error('七牛云上传失败:', error.message);
+      result.qiniuError = error.message;
+    }
+  }
+  return result;
+}
+
+/**
  * 执行截图
  */
 async function takeScreenshot(params) {
@@ -142,6 +159,7 @@ async function takeScreenshot(params) {
     const result = {
       buffer: screenshot,
       format: params.format,
+      source: 'screenshot',
     };
     
     // 如果需要返回 base64，进行转换
@@ -151,17 +169,7 @@ async function takeScreenshot(params) {
       result.base64 = `data:${mimeType};base64,${base64}`;
     }
     
-    // 如果启用了七牛云自动上传，上传图片
-    if (config.qiniu.autoUpload && config.qiniu.accessKey && config.qiniu.secretKey) {
-      try {
-        const uploadResult = await qiniuService.uploadToQiniu(screenshot, params.format);
-        result.qiniu = uploadResult;
-      } catch (error) {
-        // 上传失败不影响截图结果，只记录错误
-        console.error('七牛云上传失败:', error.message);
-        result.qiniuError = error.message;
-      }
-    }
+    await attachQiniuUpload(result);
     
     return result;
   } catch (error) {
@@ -199,6 +207,43 @@ async function takeScreenshot(params) {
 }
 
 /**
+ * 统一入口：github 源优先 README 图，否则截图
+ */
+async function captureImage(params) {
+  if (params.source === 'github') {
+    try {
+      const readmeImage = await githubReadmeImage.fetchBestReadmeImage(params.url);
+      if (readmeImage && readmeImage.buffer) {
+        const result = {
+          buffer: readmeImage.buffer,
+          format: readmeImage.format,
+          source: 'readme',
+          readmeImageUrl: readmeImage.imageUrl,
+        };
+        if (params.returnBase64) {
+          const mimeType =
+            result.format === 'jpeg'
+              ? 'image/jpeg'
+              : result.format === 'gif'
+                ? 'image/gif'
+                : result.format === 'webp'
+                  ? 'image/webp'
+                  : 'image/png';
+          result.base64 = `data:${mimeType};base64,${result.buffer.toString('base64')}`;
+        }
+        await attachQiniuUpload(result);
+        return result;
+      }
+      console.log('README 未找到可用图片，回退到页面截图');
+    } catch (error) {
+      console.warn('README 图片提取失败，回退到页面截图:', error.message);
+    }
+  }
+
+  return takeScreenshot(params);
+}
+
+/**
  * 优雅关闭
  */
 async function shutdown() {
@@ -209,6 +254,7 @@ async function shutdown() {
 
 module.exports = {
   takeScreenshot,
+  captureImage,
   shutdown,
 };
 

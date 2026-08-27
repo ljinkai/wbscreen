@@ -63,6 +63,8 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
 
 对指定 URL 截图，按服务端配置与请求参数返回 JSON（含 CDN URL / Base64）或二进制图片。
 
+当 `source` 为 `github` 时：先通过 GitHub API 读取 README 嵌入图（**不开浏览器**），下载后上传七牛；无可用图再回退为普通页面截图。
+
 **Content-Type**：`application/json`  
 **Body 上限**：约 10MB
 
@@ -71,17 +73,30 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `url` | string | **是** | — | 目标网页，须为 `http` 或 `https` |
-| `width` | number | 否 | `1920` | 视口宽度，范围 `1`–`10000` |
-| `height` | number | 否 | `1080` | 视口高度，范围 `1`–`10000` |
-| `fullPage` | boolean | 否 | `false` | `true` 时截取整页 |
-| `format` | string | 否 | `png` | `png` 或 `jpeg` |
-| `quality` | number | 否 | `90` | 仅 `jpeg` 有效，范围 `0`–`100` |
-| `waitUntil` | string | 否 | `networkidle0` | 页面就绪条件，见下表 |
-| `timeout` | number | 否 | `30000` | 导航超时（毫秒），范围 `1000`–`300000` |
+| `source` | string | 否 | — | 传 `github` 时启用 README 优先取图；其它值返回 `INVALID_SOURCE` |
+| `width` | number | 否 | `1920` | 视口宽度，范围 `1`–`10000`（仅截图路径） |
+| `height` | number | 否 | `1080` | 视口高度，范围 `1`–`10000`（仅截图路径） |
+| `fullPage` | boolean | 否 | `false` | `true` 时截取整页（仅截图路径） |
+| `format` | string | 否 | `png` | 截图格式 `png` / `jpeg`；README 路径以实际图片为准（可为 png/jpeg/gif/webp） |
+| `quality` | number | 否 | `90` | 仅截图且 `jpeg` 有效，范围 `0`–`100` |
+| `waitUntil` | string | 否 | `networkidle0` | 页面就绪条件，见下表（仅截图路径） |
+| `timeout` | number | 否 | `30000` | 导航超时（毫秒），范围 `1000`–`300000`（仅截图路径） |
 | `returnBase64` | boolean | 否 | `false` | 在 JSON 中额外/优先返回 Base64 |
 | `returnBinary` | boolean | 否 | `false` | `true` 时直接返回图片二进制 |
 | `viewport` | object | 否 | `{}` | 细粒度视口，见下表 |
 | `options` | object | 否 | `{}` | 预留扩展字段，当前可忽略 |
+
+### 3.1.1 GitHub README 优先（`source: "github"`）
+
+```
+url → GitHub Contents API 拉 README → 解析图片 → 过滤 badge → 下载第 1 张
+      → 上传七牛 → source: "readme"
+      → 失败则 Puppeteer 截图 → 上传七牛 → source: "screenshot"
+```
+
+- `url` 须为 `https://github.com/{owner}/{repo}`（可带多余 path，会解析 owner/repo）
+- README 成功时**不会**启动浏览器
+- 图片会写入七牛（与普通截图相同的自动上传逻辑）
 
 **`waitUntil` 可选值**
 
@@ -122,17 +137,19 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
   "format": "png",
   "url": "https://cdn.example.com/screenshots/1234567890_abc123.png",
   "key": "screenshots/1234567890_abc123.png",
-  "hash": "Fh8xVqod2QW1PY..."
+  "hash": "Fh8xVqod2QW1PY...",
+  "source": "readme"
 }
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `success` | boolean | `true` |
-| `format` | string | `png` / `jpeg` |
+| `format` | string | `png` / `jpeg` / `gif` / `webp` |
 | `url` | string | 可公网访问的图片地址 |
 | `key` | string | 对象存储 key |
 | `hash` | string | 存储侧 hash |
+| `source` | string | `readme`（来自 README）或 `screenshot`（页面截图）；未传 `source` 参数时一般为 `screenshot` |
 | `base64` | string | 仅当同时传 `returnBase64: true` 时出现 |
 
 #### 成功：Base64 JSON
@@ -185,6 +202,7 @@ HTTP 仍可能为 `200`；上游若依赖 `url`，请同时兼容 `base64` 或�
 |------|------|------|
 | 403 | `PERMISSION_DENIED` | 缺少或错误的 `x-wb-c` |
 | 400 | `MISSING_URL` | 未传 `url` |
+| 400 | `INVALID_SOURCE` | `source` 传了非 `github` 的值 |
 | 400 | `INVALID_URL` | URL 格式非法 |
 | 400 | `INVALID_PROTOCOL` | 非 http/https |
 | 403 | `DOMAIN_NOT_ALLOWED` | 目标域名不在白名单（服务端启用白名单时） |
@@ -213,6 +231,20 @@ curl -s -X POST http://wbscreenflow.zeabur.app/api/screenshot \
     "url": "https://example.com"
   }'
 ```
+
+### 5.1.1 GitHub 仓库（README 优先）
+
+```bash
+curl -s -X POST http://wbscreenflow.zeabur.app/api/screenshot \
+  -H "x-wb-c: 1024" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://github.com/excalidraw/excalidraw",
+    "source": "github"
+  }'
+```
+
+成功且命中 README 时，响应中 `source` 为 `"readme"`；无可用 README 图时回退截图，`source` 为 `"screenshot"`。
 
 ### 5.2 整页 + JPEG
 
@@ -284,11 +316,12 @@ console.log(data.url || data.base64?.slice(0, 64));
 ## 6. 注意事项
 
 1. **鉴权必带**：所有 `/api` 请求（含 health）都需要 `x-wb-c: 1024`。
-2. **耗时**：截图依赖目标站加载速度，默认超时 30s；复杂页建议适当加大 `timeout`，并设置合理客户端超时。
+2. **耗时**：普通截图依赖目标站加载，默认超时 30s；`source: "github"` 且命中 README 时通常更快（仅 HTTP）。
 3. **优先用 `url` 字段**：生产侧通常返回七牛 CDN；仅在需要本地落盘或调试时用 `returnBinary` / `returnBase64`。
 4. **`fullPage: true`** 可能产出很大的图片，注意下游存储与带宽。
 5. **白名单**：若服务端配置了 `ALLOWED_DOMAINS`，非白名单域名会返回 `DOMAIN_NOT_ALLOWED`。
 6. **幂等**：同一 URL 多次调用会生成新截图（新 key / 新文件），不保证缓存命中。
+7. **GitHub 限额**：服务端可配置环境变量 `GITHUB_TOKEN` 以提高 README API 限额；未配置也能工作，但更容易触发限流并回退截图。
 
 ---
 

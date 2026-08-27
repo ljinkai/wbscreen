@@ -62,10 +62,15 @@ function validateScreenshotParams(body) {
     options: body.options || {},
     returnBase64: body.returnBase64 === true || body.returnBase64 === 'true',
     returnBinary: body.returnBinary === true || body.returnBinary === 'true',
+    source: body.source ? String(body.source).toLowerCase() : undefined,
   };
   
   // 验证 URL
   validateUrl(params.url);
+
+  if (params.source && params.source !== 'github') {
+    throw new AppError('source 仅支持 github', 'INVALID_SOURCE', 400);
+  }
   
   // 验证视口尺寸
   if (params.width < 1 || params.width > 10000) {

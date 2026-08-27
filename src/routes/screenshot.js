@@ -5,100 +5,132 @@ const express = require('express');
 const router = express.Router();
 const screenshotService = require('../services/screenshotService');
 const { validateScreenshotParams } = require('../utils/validator');
-const { AppError } = require('../utils/errorHandler');
+
+function mimeForFormat(format) {
+  switch ((format || '').toLowerCase()) {
+    case 'jpeg':
+    case 'jpg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    default:
+      return 'image/png';
+  }
+}
+
+function withSource(payload, result) {
+  return {
+    ...payload,
+    ...(result.source ? { source: result.source } : {}),
+  };
+}
 
 /**
  * POST /api/screenshot
- * 截图接口
+ * 截图接口（source=github 时优先 README 图片）
  */
 router.post('/screenshot', async (req, res, next) => {
   try {
-    // 验证参数
     const params = validateScreenshotParams(req.body);
-    
-    // 执行截图
-    const result = await screenshotService.takeScreenshot(params);
-    
+    const result = await screenshotService.captureImage(params);
+
     const config = require('../config/default');
     const hasQiniuUpload = result.qiniu && config.qiniu.autoUpload;
     const hasQiniuConfig = config.qiniu.accessKey && config.qiniu.secretKey;
-    
-    // 如果明确要求返回二进制图片，返回二进制
+
     if (params.returnBinary) {
-      const contentType = result.format === 'jpeg' ? 'image/jpeg' : 'image/png';
-      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Type', mimeForFormat(result.format));
       res.setHeader('Content-Length', result.buffer.length);
       res.setHeader('Cache-Control', 'no-cache');
+      if (result.source) {
+        res.setHeader('X-Image-Source', result.source);
+      }
       return res.send(result.buffer);
     }
-    
-    // 如果上传到七牛云，返回 JSON 格式（包含 URL）- 默认行为
+
     if (hasQiniuUpload) {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Cache-Control', 'no-cache');
-      return res.json({
-        success: true,
-        format: result.format,
-        url: result.qiniu.url,
-        key: result.qiniu.key,
-        hash: result.qiniu.hash,
-        ...(params.returnBase64 && { base64: result.base64 }),
-      });
+      return res.json(
+        withSource(
+          {
+            success: true,
+            format: result.format,
+            url: result.qiniu.url,
+            key: result.qiniu.key,
+            hash: result.qiniu.hash,
+            ...(params.returnBase64 && { base64: result.base64 }),
+          },
+          result
+        )
+      );
     }
-    
-    // 如果配置了七牛云但上传失败，返回错误信息（但仍返回 JSON）
+
     if (hasQiniuConfig && result.qiniuError) {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Cache-Control', 'no-cache');
-      return res.json({
-        success: true,
-        format: result.format,
-        warning: '七牛云上传失败，返回 base64',
-        base64: result.base64 || (() => {
-          const base64 = result.buffer.toString('base64');
-          const mimeType = result.format === 'jpeg' ? 'image/jpeg' : 'image/png';
-          return `data:${mimeType};base64,${base64}`;
-        })(),
-        error: result.qiniuError,
-      });
+      return res.json(
+        withSource(
+          {
+            success: true,
+            format: result.format,
+            warning: '七牛云上传失败，返回 base64',
+            base64:
+              result.base64 ||
+              `data:${mimeForFormat(result.format)};base64,${result.buffer.toString('base64')}`,
+            error: result.qiniuError,
+          },
+          result
+        )
+      );
     }
-    
-    // 如果需要返回 base64，返回 JSON 格式
+
     if (params.returnBase64) {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Cache-Control', 'no-cache');
-      return res.json({
-        success: true,
-        format: result.format,
-        base64: result.base64,
-      });
+      return res.json(
+        withSource(
+          {
+            success: true,
+            format: result.format,
+            base64: result.base64,
+          },
+          result
+        )
+      );
     }
-    
-    // 如果配置了七牛云但未启用自动上传，默认返回 JSON（包含 base64）
+
     if (hasQiniuConfig) {
-      const base64 = result.buffer.toString('base64');
-      const mimeType = result.format === 'jpeg' ? 'image/jpeg' : 'image/png';
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Cache-Control', 'no-cache');
-      return res.json({
-        success: true,
-        format: result.format,
-        base64: `data:${mimeType};base64,${base64}`,
-        note: '七牛云自动上传未启用，返回 base64 编码',
-      });
+      return res.json(
+        withSource(
+          {
+            success: true,
+            format: result.format,
+            base64: `data:${mimeForFormat(result.format)};base64,${result.buffer.toString('base64')}`,
+            note: '七牛云自动上传未启用，返回 base64 编码',
+          },
+          result
+        )
+      );
     }
-    
-    // 默认返回 JSON 格式（包含 base64），而不是二进制图片
-    const base64 = result.buffer.toString('base64');
-    const mimeType = result.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-cache');
-    return res.json({
-      success: true,
-      format: result.format,
-      base64: `data:${mimeType};base64,${base64}`,
-      note: '未配置七牛云，返回 base64 编码。如需二进制图片，请设置 returnBinary: true',
-    });
+    return res.json(
+      withSource(
+        {
+          success: true,
+          format: result.format,
+          base64: `data:${mimeForFormat(result.format)};base64,${result.buffer.toString('base64')}`,
+          note: '未配置七牛云，返回 base64 编码。如需二进制图片，请设置 returnBinary: true',
+        },
+        result
+      )
+    );
   } catch (error) {
     next(error);
   }
@@ -116,4 +148,3 @@ router.get('/health', (req, res) => {
 });
 
 module.exports = router;
-
