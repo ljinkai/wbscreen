@@ -5,7 +5,7 @@ const puppeteer = require('puppeteer');
 const config = require('../config/default');
 const { AppError } = require('../utils/errorHandler');
 const qiniuService = require('./qiniuService');
-const githubReadmeImage = require('./githubReadmeImage');
+const githubRepo = require('./githubRepo');
 
 class BrowserPool {
   constructor() {
@@ -207,36 +207,24 @@ async function takeScreenshot(params) {
 }
 
 /**
- * 统一入口：github 源优先 README 图，否则截图
+ * 统一入口：github 源优先 About 官网截图，否则截仓库页
  */
 async function captureImage(params) {
   if (params.source === 'github') {
-    try {
-      const readmeImage = await githubReadmeImage.fetchBestReadmeImage(params.url);
-      if (readmeImage && readmeImage.buffer) {
-        const result = {
-          buffer: readmeImage.buffer,
-          format: readmeImage.format,
-          source: 'readme',
-          readmeImageUrl: readmeImage.imageUrl,
-        };
-        if (params.returnBase64) {
-          const mimeType =
-            result.format === 'jpeg'
-              ? 'image/jpeg'
-              : result.format === 'gif'
-                ? 'image/gif'
-                : result.format === 'webp'
-                  ? 'image/webp'
-                  : 'image/png';
-          result.base64 = `data:${mimeType};base64,${result.buffer.toString('base64')}`;
+    const repo = githubRepo.parseGithubRepoUrl(params.url);
+    if (repo) {
+      try {
+        const homepage = await githubRepo.fetchRepoHomepage(repo.owner, repo.repo);
+        if (homepage) {
+          const result = await takeScreenshot({ ...params, url: homepage });
+          result.source = 'homepage';
+          result.homepageUrl = homepage;
+          return result;
         }
-        await attachQiniuUpload(result);
-        return result;
+        console.log('GitHub About 未配置官网，回退到仓库页面截图');
+      } catch (error) {
+        console.warn('GitHub About 官网截图失败，回退到仓库页面截图:', error.message);
       }
-      console.log('README 未找到可用图片，回退到页面截图');
-    } catch (error) {
-      console.warn('README 图片提取失败，回退到页面截图:', error.message);
     }
   }
 

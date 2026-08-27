@@ -63,7 +63,7 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
 
 对指定 URL 截图，按服务端配置与请求参数返回 JSON（含 CDN URL / Base64）或二进制图片。
 
-当 `source` 为 `github` 时：先通过 GitHub API 读取 README 嵌入图（**不开浏览器**），下载后上传七牛；无可用图再回退为普通页面截图。
+当 `source` 为 `github` 时：先通过 GitHub API 读取仓库 About 中的官网（`homepage`），用 Puppeteer 打开该官网并截图上传七牛；未配置官网时再回退为 GitHub 仓库页截图。
 
 **Content-Type**：`application/json`  
 **Body 上限**：约 10MB
@@ -73,11 +73,11 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `url` | string | **是** | — | 目标网页，须为 `http` 或 `https` |
-| `source` | string | 否 | — | 传 `github` 时启用 README 优先取图；其它值返回 `INVALID_SOURCE` |
+| `source` | string | 否 | — | 传 `github` 时优先截 About 官网；其它值返回 `INVALID_SOURCE` |
 | `width` | number | 否 | `1920` | 视口宽度，范围 `1`–`10000`（仅截图路径） |
 | `height` | number | 否 | `1080` | 视口高度，范围 `1`–`10000`（仅截图路径） |
 | `fullPage` | boolean | 否 | `false` | `true` 时截取整页（仅截图路径） |
-| `format` | string | 否 | `png` | 截图格式 `png` / `jpeg`；README 路径以实际图片为准（可为 png/jpeg/gif/webp） |
+| `format` | string | 否 | `png` | 截图格式 `png` / `jpeg` |
 | `quality` | number | 否 | `90` | 仅截图且 `jpeg` 有效，范围 `0`–`100` |
 | `waitUntil` | string | 否 | `networkidle0` | 页面就绪条件，见下表（仅截图路径） |
 | `timeout` | number | 否 | `30000` | 导航超时（毫秒），范围 `1000`–`300000`（仅截图路径） |
@@ -86,17 +86,17 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
 | `viewport` | object | 否 | `{}` | 细粒度视口，见下表 |
 | `options` | object | 否 | `{}` | 预留扩展字段，当前可忽略 |
 
-### 3.1.1 GitHub README 优先（`source: "github"`）
+### 3.1.1 GitHub About 官网优先（`source: "github"`）
 
 ```
-url → GitHub Contents API 拉 README → 解析图片 → 过滤 badge → 下载第 1 张
-      → 上传七牛 → source: "readme"
-      → 失败则 Puppeteer 截图 → 上传七牛 → source: "screenshot"
+url → GitHub API 读 homepage（About 官网）
+      → Puppeteer 打开官网并截图 → 上传七牛 → source: "homepage"
+      → 无官网或失败 → Puppeteer 截 GitHub 仓库页 → source: "screenshot"
 ```
 
 - `url` 须为 `https://github.com/{owner}/{repo}`（可带多余 path，会解析 owner/repo）
-- README 成功时**不会**启动浏览器
-- 图片会写入七牛（与普通截图相同的自动上传逻辑）
+- About 官网可能不带 `https://`，服务端会自动补全
+- 截图参数（`width` / `height` / `waitUntil` 等）作用于官网页面
 
 **`waitUntil` 可选值**
 
@@ -138,18 +138,18 @@ url → GitHub Contents API 拉 README → 解析图片 → 过滤 badge → 下
   "url": "https://cdn.example.com/screenshots/1234567890_abc123.png",
   "key": "screenshots/1234567890_abc123.png",
   "hash": "Fh8xVqod2QW1PY...",
-  "source": "readme"
+  "source": "homepage"
 }
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `success` | boolean | `true` |
-| `format` | string | `png` / `jpeg` / `gif` / `webp` |
+| `format` | string | `png` / `jpeg` |
 | `url` | string | 可公网访问的图片地址 |
 | `key` | string | 对象存储 key |
 | `hash` | string | 存储侧 hash |
-| `source` | string | `readme`（来自 README）或 `screenshot`（页面截图）；未传 `source` 参数时一般为 `screenshot` |
+| `source` | string | `homepage`（About 官网截图）、`screenshot`（仓库页或其它 URL 截图）；未传 `source` 时一般为 `screenshot` |
 | `base64` | string | 仅当同时传 `returnBase64: true` 时出现 |
 
 #### 成功：Base64 JSON
@@ -232,7 +232,7 @@ curl -s -X POST http://wbscreenflow.zeabur.app/api/screenshot \
   }'
 ```
 
-### 5.1.1 GitHub 仓库（README 优先）
+### 5.1.1 GitHub 仓库（About 官网优先）
 
 ```bash
 curl -s -X POST http://wbscreenflow.zeabur.app/api/screenshot \
@@ -244,7 +244,7 @@ curl -s -X POST http://wbscreenflow.zeabur.app/api/screenshot \
   }'
 ```
 
-成功且命中 README 时，响应中 `source` 为 `"readme"`；无可用 README 图时回退截图，`source` 为 `"screenshot"`。
+成功且 About 配置了官网时，响应中 `source` 为 `"homepage"`；无官网或官网截图失败时回退仓库页截图，`source` 为 `"screenshot"`。
 
 ### 5.2 整页 + JPEG
 
@@ -316,12 +316,12 @@ console.log(data.url || data.base64?.slice(0, 64));
 ## 6. 注意事项
 
 1. **鉴权必带**：所有 `/api` 请求（含 health）都需要 `x-wb-c: 1024`。
-2. **耗时**：普通截图依赖目标站加载，默认超时 30s；`source: "github"` 且命中 README 时通常更快（仅 HTTP）。
+2. **耗时**：普通截图依赖目标站加载，默认超时 30s；`source: "github"` 需先调 GitHub API 再开浏览器截官网。
 3. **优先用 `url` 字段**：生产侧通常返回七牛 CDN；仅在需要本地落盘或调试时用 `returnBinary` / `returnBase64`。
 4. **`fullPage: true`** 可能产出很大的图片，注意下游存储与带宽。
 5. **白名单**：若服务端配置了 `ALLOWED_DOMAINS`，非白名单域名会返回 `DOMAIN_NOT_ALLOWED`。
 6. **幂等**：同一 URL 多次调用会生成新截图（新 key / 新文件），不保证缓存命中。
-7. **GitHub 限额**：服务端可配置环境变量 `GITHUB_TOKEN` 以提高 README API 限额；未配置也能工作，但更容易触发限流并回退截图。
+7. **GitHub 限额**：服务端可配置环境变量 `GITHUB_TOKEN` 以提高 GitHub API 限额；未配置也能工作，但更容易触发限流并回退仓库页截图。
 
 ---
 

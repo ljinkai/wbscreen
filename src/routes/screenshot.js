@@ -24,12 +24,13 @@ function withSource(payload, result) {
   return {
     ...payload,
     ...(result.source ? { source: result.source } : {}),
+    ...(result.homepageUrl ? { homepageUrl: result.homepageUrl } : {}),
   };
 }
 
 /**
  * POST /api/screenshot
- * 截图接口（source=github 时优先 README 图片）
+ * 截图接口（source=github 时优先 About 官网截图）
  */
 router.post('/screenshot', async (req, res, next) => {
   try {
