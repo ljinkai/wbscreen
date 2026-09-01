@@ -7,6 +7,7 @@ const { AppError } = require('../utils/errorHandler');
 const qiniuService = require('./qiniuService');
 const githubRepo = require('./githubRepo');
 const xPost = require('./xPost');
+const xEmbed = require('./xEmbed');
 
 class BrowserPool {
   constructor() {
@@ -228,6 +229,48 @@ function attachBase64(result, params) {
   result.base64 = `data:${mimeType};base64,${result.buffer.toString('base64')}`;
 }
 
+function elementScreenshotOptions(params) {
+  const elementOpts = { type: params.format };
+  if (params.format.toLowerCase() === 'jpeg') {
+    elementOpts.quality = params.quality;
+  }
+  return elementOpts;
+}
+
+/**
+ * X 帖优先：官方 embed 卡片截图（长文尽力 Show more）
+ * @returns {Promise<{ buffer: Buffer, source: 'embed' } | null>}
+ */
+async function tryXEmbedScreenshot(page, params) {
+  if (!xPost.isXStatusUrl(params.url) || params.selector) {
+    return null;
+  }
+  const status = xEmbed.parseStatusUrl(params.url);
+  if (!status) return null;
+
+  await page.setUserAgent(xPost.DESKTOP_UA);
+  await page.setViewport(params.viewport);
+  await page.setContent(xEmbed.buildEmbedHtml(status), {
+    waitUntil: ['load', 'networkidle2'],
+    timeout: params.timeout,
+  });
+
+  let handle = await xEmbed.waitForEmbedCard(page, params.timeout);
+  await xEmbed.expandEmbedLongText(page);
+  // 展开后重新取节点，避免尺寸过期
+  const refreshed = await page.$(
+    'iframe[id^="twitter-widget-"], iframe[src*="platform.twitter.com"], iframe[src*="platform.x.com"], .twitter-tweet-rendered'
+  );
+  if (refreshed) {
+    await handle.dispose().catch(() => {});
+    handle = refreshed;
+  }
+
+  const buffer = await handle.screenshot(elementScreenshotOptions(params));
+  await handle.dispose().catch(() => {});
+  return { buffer, source: 'embed' };
+}
+
 /**
  * 执行截图
  */
@@ -248,6 +291,28 @@ async function takeScreenshot(params) {
     
     // 设置视口
     await page.setViewport(params.viewport);
+
+    let screenshot;
+    let source = 'screenshot';
+    let warning;
+
+    // X 帖：优先官方 embed（无显式 selector 时）
+    try {
+      const embedResult = await tryXEmbedScreenshot(page, params);
+      if (embedResult) {
+        const result = {
+          buffer: embedResult.buffer,
+          format: params.format,
+          source: embedResult.source,
+        };
+        attachBase64(result, params);
+        await attachQiniuUpload(result);
+        return result;
+      }
+    } catch (embedError) {
+      console.warn('X embed 截图失败，回退帖子页:', embedError.message);
+      warning = `X embed 截图失败，已回退帖子页: ${embedError.message}`;
+    }
     
     await page.setUserAgent(xPost.userAgentForUrl(params.url));
 
@@ -257,9 +322,6 @@ async function takeScreenshot(params) {
     });
 
     const effectiveSelector = xPost.resolveSelector(params.url, params.selector);
-    let screenshot;
-    let source = 'screenshot';
-    let warning;
 
     if (effectiveSelector) {
       try {
@@ -271,16 +333,13 @@ async function takeScreenshot(params) {
         if (!handle) {
           throw new Error(`selector not found: ${effectiveSelector}`);
         }
-        const elementOpts = { type: params.format };
-        if (params.format.toLowerCase() === 'jpeg') {
-          elementOpts.quality = params.quality;
-        }
-        screenshot = await handle.screenshot(elementOpts);
+        screenshot = await handle.screenshot(elementScreenshotOptions(params));
         await handle.dispose().catch(() => {});
         source = 'element';
       } catch (elementError) {
         console.warn('元素截图失败，降级整页:', elementError.message);
-        warning = `元素截图失败，已降级整页: ${elementError.message}`;
+        const elementWarning = `元素截图失败，已降级整页: ${elementError.message}`;
+        warning = warning ? `${warning}；${elementWarning}` : elementWarning;
         try {
           await dismissBlockingOverlays(page);
         } catch {

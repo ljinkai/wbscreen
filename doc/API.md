@@ -74,7 +74,7 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
 |------|------|------|--------|------|
 | `url` | string | **是** | — | 目标网页，须为 `http` 或 `https` |
 | `source` | string | 否 | — | 传 `github` 时优先截 About 官网；其它值返回 `INVALID_SOURCE` |
-| `selector` | string | 否 | — | CSS 选择器；有则截该元素。X 帖子 URL 未传时默认主帖 `article[data-testid="tweet"]` |
+| `selector` | string | 否 | — | CSS 选择器；有则截该元素（X URL 有 selector 时跳过 embed）。X 未传时优先 embed，失败再截主帖 `article[data-testid="tweet"]` |
 | `width` | number | 否 | `1920` | 视口宽度，范围 `1`–`10000`（仅截图路径） |
 | `height` | number | 否 | `1080` | 视口高度，范围 `1`–`10000`（仅截图路径） |
 | `fullPage` | boolean | 否 | `false` | `true` 时截取整页（仅截图路径） |
@@ -99,14 +99,16 @@ url → GitHub API 读 homepage（About 官网）
 - About 官网可能不带 `https://`，服务端会自动补全
 - 截图参数（`width` / `height` / `waitUntil` 等）作用于官网页面
 
-### 3.1.2 元素截图与 X 主帖
+### 3.1.2 元素截图与 X 主帖（Embed 优先）
 
-- 传 `selector`：对匹配的第一个元素截图，成功时响应 `source` 为 `"element"`
-- URL 为 `x.com` / `twitter.com` 的 `/status/{id}` 帖子页时：
-  - 自动使用**移动 User-Agent**（视口尺寸仍由 `width`/`height` 决定）
-  - 未传 `selector` 时默认截主帖（时间线第一条 `article[data-testid="tweet"]`）
-- 元素等待或截图失败时：**降级**为整页/视口截图，`source` 为 `"screenshot"`，并带 `warning` 说明原因
-- 元素截图成功时忽略 `fullPage` / `options.clip`
+- 传 `selector`：对匹配的第一个元素截图，成功时响应 `source` 为 `"element"`（**不会**走 X embed）
+- URL 为 `x.com` / `twitter.com` 的 `/status/{id}` 且**未传** `selector` 时：
+  1. **优先**用官方 Embed（`blockquote.twitter-tweet` + `widgets.js`）渲染卡片并截图 → `source: "embed"`
+  2. 长文尽力点击 **Show more / Read more** 后再截，尽量拿到全文高度
+  3. Embed 失败则回退打开帖子页：移动 UA + 主帖 `article[data-testid="tweet"]` → `source: "element"`
+  4. 再失败则整页/视口截图 → `source: "screenshot"` + `warning`
+- Embed / 元素截图成功时忽略 `fullPage` / `options.clip`
+- 视口尺寸仍由上游 `width` / `height` 决定
 
 **`waitUntil` 可选值**
 
@@ -159,7 +161,8 @@ url → GitHub API 读 homepage（About 官网）
 | `url` | string | 可公网访问的图片地址 |
 | `key` | string | 对象存储 key |
 | `hash` | string | 存储侧 hash |
-| `source` | string | `element`（元素截图）、`homepage`（About 官网截图）、`screenshot`（整页/视口或降级截图）；未传请求参数 `source` 时一般为 `screenshot` 或 `element` |
+| `source` | string | `embed`（X 官方嵌入卡片）、`element`（页面元素截图）、`homepage`（GitHub About 官网）、`screenshot`（整页/视口或最终降级） |
+| `warning` | string | 可选；embed/元素失败后降级时说明原因 |
 | `warning` | string | 可选；元素截图降级或七牛上传失败等场景下的说明 |
 | `base64` | string | 仅当同时传 `returnBase64: true` 时出现 |
 
@@ -271,7 +274,7 @@ curl -s -X POST https://wbscreenflow.zeabur.app/api/screenshot \
   }'
 ```
 
-未传 `selector` 时默认截主帖；成功时 `source` 为 `"element"`，失败降级时为 `"screenshot"` 并带 `warning`。
+未传 `selector` 时优先走官方 Embed，成功时 `source` 为 `"embed"`；Embed 失败回退帖子页主帖为 `"element"`；再失败为 `"screenshot"` 并带 `warning`。长文会尽力展开后再截。
 
 ### 5.2 整页 + JPEG
 

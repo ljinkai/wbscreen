@@ -1,21 +1,22 @@
 # X 主帖元素截图设计
 
 **日期**：2026-09-01  
-**状态**：已确认
+**状态**：已确认（已扩展：X Embed 优先 + 长文 Show more）
 
 ## 目标
 
-支持只截取页面中指定元素；对 X（Twitter）帖子 URL 默认截主帖内容区，并以手机端布局呈现（移动 UA + 上游传入的视口尺寸）。元素截图失败时降级为整页/视口截图并标注。
+支持只截取页面中指定元素；对 X（Twitter）帖子 URL **优先**用官方 Embed 卡片截图（长文尽力展开），失败再回退帖子页主帖元素截图；元素/embed 失败时降级整页并标注。
 
 ## 决策摘要
 
 | 项 | 决定 |
 |----|------|
-| 能力组合 | 通用 `selector` + X `/status/` URL 自动主帖选择器 |
-| 尺寸 | 上游传 `width` / `height`（或 `viewport`），服务端不写死手机分辨率 |
-| UA | X 帖子自动使用移动 UA；其它站点保持现有桌面 UA（除非另有约定） |
-| 失败策略 | 尽力关弹层并等待主帖；失败则整页截图 + `warning`（方案 C） |
-| 实现落点 | 在现有 `takeScreenshot` 流程内扩展（方案 1） |
+| 能力组合 | 通用 `selector` + X `/status/` **Embed 优先** + 帖子页主帖回退 |
+| 尺寸 | 上游传 `width` / `height` |
+| UA | Embed 用桌面 UA；帖子页回退用移动 UA |
+| 长文 | Embed iframe 内尽力点击 Show more / Read more 后再截 |
+| `source` | `embed` / `element` / `screenshot`（及既有 `homepage`） |
+| 失败策略 | embed → 帖子页 element → 整页 + `warning` |
 
 ## API
 
