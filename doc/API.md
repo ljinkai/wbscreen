@@ -74,7 +74,7 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
 |------|------|------|--------|------|
 | `url` | string | **是** | — | 目标网页，须为 `http` 或 `https` |
 | `source` | string | 否 | — | 传 `github` 时优先截 About 官网；其它值返回 `INVALID_SOURCE` |
-| `selector` | string | 否 | — | CSS 选择器；有则截该元素。X 帖子未传时默认 `ul > li:first-child article`（第一个 li 下的 article） |
+| `selector` | string | 否 | — | CSS 选择器；有则截该元素。X 帖子未传时默认 `ul > li:first-child` |
 | `width` | number | 否 | `1920` | 视口宽度，范围 `1`–`10000`（仅截图路径） |
 | `height` | number | 否 | `1080` | 视口高度，范围 `1`–`10000`（仅截图路径） |
 | `fullPage` | boolean | 否 | `false` | `true` 时截取整页（仅截图路径） |
@@ -103,7 +103,7 @@ url → GitHub API 读 homepage（About 官网）
 
 - 传 `selector`：对匹配的第一个元素截图，成功时响应 `source` 为 `"element"`
 - URL 为 `x.com` / `twitter.com` 的 `/status/{id}` 且**未传** `selector` 时：
-  - **当前**：打开帖子页，截 `ul > li:first-child article`（列表第一个 li 下的 article）→ `source: "element"`
+  - **当前**：打开帖子页，截 `ul > li:first-child`（列表第一个 li）→ `source: "element"`
   - 失败则整页/视口截图 → `source: "screenshot"` + `warning`
   - （官方 Embed 路径已实现但**暂时关闭**，开关：`X_EMBED_ENABLED`）
 - 元素截图成功时忽略 `fullPage` / `options.clip`

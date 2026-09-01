@@ -285,7 +285,7 @@ async function tryXEmbedScreenshot(page, params, { force = false } = {}) {
  */
 async function waitForTweetElement(page, params, candidates) {
   const timeout = params.timeout;
-  const sel = candidates[0] || 'ul > li:first-child article';
+  const sel = candidates[0] || 'ul > li:first-child';
 
   // 1) 只要求节点进入 DOM（attached），不要求当前可见
   await page.waitForSelector(sel, { timeout, visible: false });

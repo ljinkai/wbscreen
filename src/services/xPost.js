@@ -2,12 +2,11 @@
  * X / Twitter 帖子页辅助（主帖元素截图）
  */
 
-const DEFAULT_TWEET_SELECTOR = 'ul > li:first-child article';
+const DEFAULT_TWEET_SELECTOR = 'ul > li:first-child';
 
 /** 主帖候选选择器（按优先级） */
 const TWEET_SELECTOR_CANDIDATES = [
-  'ul > li:first-child article',
-  'ul li:first-child article',
+  'ul > li:first-child',
 ];
 
 const MOBILE_UA =
