@@ -9,8 +9,10 @@ const githubRepo = require('./githubRepo');
 const xPost = require('./xPost');
 const xEmbed = require('./xEmbed');
 
-/** 暂时关闭 X 官方 embed，仅用帖子页 article[data-testid="tweet"] 元素截图 */
+/** 暂时关闭 X 官方 embed 优先；元素失败后仍可作回退 */
 const X_EMBED_ENABLED = false;
+/** 帖子页元素截图失败时，再试一次 embed（不依赖打开 x.com 主站 DOM） */
+const X_EMBED_FALLBACK = true;
 
 class BrowserPool {
   constructor() {
@@ -244,8 +246,9 @@ function elementScreenshotOptions(params) {
  * X 帖优先：官方 embed 卡片截图（长文尽力 Show more）
  * @returns {Promise<{ buffer: Buffer, source: 'embed' } | null>}
  */
-async function tryXEmbedScreenshot(page, params) {
-  if (!X_EMBED_ENABLED) return null;
+async function tryXEmbedScreenshot(page, params, { force = false } = {}) {
+  if (!force && !X_EMBED_ENABLED) return null;
+  if (force && !X_EMBED_FALLBACK) return null;
   if (!xPost.isXStatusUrl(params.url) || params.selector) {
     return null;
   }
@@ -273,6 +276,42 @@ async function tryXEmbedScreenshot(page, params) {
   const buffer = await handle.screenshot(elementScreenshotOptions(params));
   await handle.dispose().catch(() => {});
   return { buffer, source: 'embed' };
+}
+
+/**
+ * 等待并返回可截图的主帖元素（先关弹层，再试多个选择器）
+ * @returns {Promise<import('puppeteer').ElementHandle>}
+ */
+async function waitForTweetElement(page, params, candidates) {
+  const perTry = Math.max(5000, Math.floor(params.timeout / Math.max(candidates.length, 1)));
+
+  await dismissBlockingOverlays(page);
+  await new Promise((r) => setTimeout(r, 500));
+  await dismissBlockingOverlays(page);
+
+  let lastError;
+  for (const sel of candidates) {
+    try {
+      await page.waitForSelector(sel, { timeout: perTry, visible: true });
+      let handle = await page.$(sel);
+      if (!handle) continue;
+
+      // tweetText 时上溯到 article
+      if (sel.includes('tweetText')) {
+        const article = await page.evaluateHandle((el) => {
+          return el.closest('article') || el;
+        }, handle);
+        await handle.dispose().catch(() => {});
+        handle = article.asElement() || handle;
+      }
+
+      return handle;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error(`selectors not found: ${candidates.join(', ')}`);
 }
 
 /**
@@ -320,35 +359,61 @@ async function takeScreenshot(params) {
     
     await page.setUserAgent(xPost.userAgentForUrl(params.url));
 
+    // X 站 networkidle0 很难满足，帖子页改用更宽松的就绪条件
+    const gotoWaitUntil = xPost.isXStatusUrl(params.url)
+      ? 'domcontentloaded'
+      : params.waitUntil;
+
     await page.goto(params.url, {
-      waitUntil: params.waitUntil,
+      waitUntil: gotoWaitUntil,
       timeout: params.timeout,
     });
 
+    // 给客户端 hydrate 一点时间
+    if (xPost.isXStatusUrl(params.url)) {
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+
+    const candidates = xPost.selectorCandidatesFor(params.url, params.selector);
     const effectiveSelector = xPost.resolveSelector(params.url, params.selector);
 
-    if (effectiveSelector) {
+    if (candidates.length > 0 || effectiveSelector) {
+      const sels = candidates.length > 0 ? candidates : [effectiveSelector];
       try {
-        await page.waitForSelector(effectiveSelector, { timeout: params.timeout });
-        // 弹层常在主帖出现后弹出；关闭两次提高成功率
-        await dismissBlockingOverlays(page);
-        await dismissBlockingOverlays(page);
-        const handle = await page.$(effectiveSelector);
-        if (!handle) {
-          throw new Error(`selector not found: ${effectiveSelector}`);
-        }
+        const handle = await waitForTweetElement(page, params, sels);
         screenshot = await handle.screenshot(elementScreenshotOptions(params));
         await handle.dispose().catch(() => {});
         source = 'element';
       } catch (elementError) {
-        console.warn('元素截图失败，降级整页:', elementError.message);
-        const elementWarning = `元素截图失败，已降级整页: ${elementError.message}`;
+        console.warn('元素截图失败:', elementError.message);
+        const elementWarning = `元素截图失败: ${elementError.message}`;
         warning = warning ? `${warning}；${elementWarning}` : elementWarning;
+
+        // 元素失败后再试 embed（不依赖 x.com 主站 DOM）
+        try {
+          const embedFallback = await tryXEmbedScreenshot(page, params, { force: true });
+          if (embedFallback) {
+            const result = {
+              buffer: embedFallback.buffer,
+              format: params.format,
+              source: embedFallback.source,
+              warning: `${warning}；已回退 embed`,
+            };
+            attachBase64(result, params);
+            await attachQiniuUpload(result);
+            return result;
+          }
+        } catch (embedFbError) {
+          console.warn('X embed 回退也失败:', embedFbError.message);
+          warning = `${warning}；embed 回退失败: ${embedFbError.message}`;
+        }
+
         try {
           await dismissBlockingOverlays(page);
         } catch {
           // ignore
         }
+        warning = `${warning}；已降级整页`;
         screenshot = await page.screenshot(buildPageScreenshotOptions(params));
         source = 'screenshot';
       }

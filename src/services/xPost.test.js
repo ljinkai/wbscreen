@@ -12,6 +12,7 @@ describe('isXStatusUrl', () => {
     assert.equal(isXStatusUrl('https://www.x.com/user/status/123'), true);
     assert.equal(isXStatusUrl('https://twitter.com/user/status/123'), true);
     assert.equal(isXStatusUrl('https://www.twitter.com/user/status/123/photo/1'), true);
+    assert.equal(isXStatusUrl('https://mobile.twitter.com/user/status/123'), true);
   });
 
   it('rejects non-status and non-x hosts', () => {
