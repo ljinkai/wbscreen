@@ -99,15 +99,14 @@ url → GitHub API 读 homepage（About 官网）
 - About 官网可能不带 `https://`，服务端会自动补全
 - 截图参数（`width` / `height` / `waitUntil` 等）作用于官网页面
 
-### 3.1.2 元素截图与 X 主帖（Embed 优先）
+### 3.1.2 元素截图与 X 主帖
 
-- 传 `selector`：对匹配的第一个元素截图，成功时响应 `source` 为 `"element"`（**不会**走 X embed）
+- 传 `selector`：对匹配的第一个元素截图，成功时响应 `source` 为 `"element"`
 - URL 为 `x.com` / `twitter.com` 的 `/status/{id}` 且**未传** `selector` 时：
-  1. **优先**用官方 Embed（`blockquote.twitter-tweet` + `widgets.js`）渲染卡片并截图 → `source: "embed"`
-  2. 长文尽力点击 **Show more / Read more** 后再截，尽量拿到全文高度
-  3. Embed 失败则回退打开帖子页：移动 UA + 主帖 `article[data-testid="tweet"]` → `source: "element"`
-  4. 再失败则整页/视口截图 → `source: "screenshot"` + `warning`
-- Embed / 元素截图成功时忽略 `fullPage` / `options.clip`
+  - **当前**：打开帖子页，移动 UA，截主帖 `article[data-testid="tweet"]`（第一条）→ `source: "element"`
+  - 失败则整页/视口截图 → `source: "screenshot"` + `warning`
+  - （官方 Embed 路径已实现但**暂时关闭**，开关：`X_EMBED_ENABLED`）
+- 元素截图成功时忽略 `fullPage` / `options.clip`
 - 视口尺寸仍由上游 `width` / `height` 决定
 
 **`waitUntil` 可选值**
@@ -274,7 +273,7 @@ curl -s -X POST https://wbscreenflow.zeabur.app/api/screenshot \
   }'
 ```
 
-未传 `selector` 时优先走官方 Embed，成功时 `source` 为 `"embed"`；Embed 失败回退帖子页主帖为 `"element"`；再失败为 `"screenshot"` 并带 `warning`。长文会尽力展开后再截。
+未传 `selector` 时截帖子页主帖元素，成功时 `source` 为 `"element"`；失败降级为 `"screenshot"` 并带 `warning`。（Embed 路径暂时关闭。）
 
 ### 5.2 整页 + JPEG
 

@@ -9,6 +9,9 @@ const githubRepo = require('./githubRepo');
 const xPost = require('./xPost');
 const xEmbed = require('./xEmbed');
 
+/** 暂时关闭 X 官方 embed，仅用帖子页 article[data-testid="tweet"] 元素截图 */
+const X_EMBED_ENABLED = false;
+
 class BrowserPool {
   constructor() {
     this.browsers = [];
@@ -242,6 +245,7 @@ function elementScreenshotOptions(params) {
  * @returns {Promise<{ buffer: Buffer, source: 'embed' } | null>}
  */
 async function tryXEmbedScreenshot(page, params) {
+  if (!X_EMBED_ENABLED) return null;
   if (!xPost.isXStatusUrl(params.url) || params.selector) {
     return null;
   }
