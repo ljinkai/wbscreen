@@ -74,6 +74,7 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
 |------|------|------|--------|------|
 | `url` | string | **是** | — | 目标网页，须为 `http` 或 `https` |
 | `source` | string | 否 | — | 传 `github` 时优先截 About 官网；其它值返回 `INVALID_SOURCE` |
+| `selector` | string | 否 | — | CSS 选择器；有则截该元素。X 帖子 URL 未传时默认主帖 `article[data-testid="tweet"]` |
 | `width` | number | 否 | `1920` | 视口宽度，范围 `1`–`10000`（仅截图路径） |
 | `height` | number | 否 | `1080` | 视口高度，范围 `1`–`10000`（仅截图路径） |
 | `fullPage` | boolean | 否 | `false` | `true` 时截取整页（仅截图路径） |
@@ -97,6 +98,15 @@ url → GitHub API 读 homepage（About 官网）
 - `url` 须为 `https://github.com/{owner}/{repo}`（可带多余 path，会解析 owner/repo）
 - About 官网可能不带 `https://`，服务端会自动补全
 - 截图参数（`width` / `height` / `waitUntil` 等）作用于官网页面
+
+### 3.1.2 元素截图与 X 主帖
+
+- 传 `selector`：对匹配的第一个元素截图，成功时响应 `source` 为 `"element"`
+- URL 为 `x.com` / `twitter.com` 的 `/status/{id}` 帖子页时：
+  - 自动使用**移动 User-Agent**（视口尺寸仍由 `width`/`height` 决定）
+  - 未传 `selector` 时默认截主帖（时间线第一条 `article[data-testid="tweet"]`）
+- 元素等待或截图失败时：**降级**为整页/视口截图，`source` 为 `"screenshot"`，并带 `warning` 说明原因
+- 元素截图成功时忽略 `fullPage` / `options.clip`
 
 **`waitUntil` 可选值**
 
@@ -149,7 +159,8 @@ url → GitHub API 读 homepage（About 官网）
 | `url` | string | 可公网访问的图片地址 |
 | `key` | string | 对象存储 key |
 | `hash` | string | 存储侧 hash |
-| `source` | string | `homepage`（About 官网截图）、`screenshot`（仓库页或其它 URL 截图）；未传 `source` 时一般为 `screenshot` |
+| `source` | string | `element`（元素截图）、`homepage`（About 官网截图）、`screenshot`（整页/视口或降级截图）；未传请求参数 `source` 时一般为 `screenshot` 或 `element` |
+| `warning` | string | 可选；元素截图降级或七牛上传失败等场景下的说明 |
 | `base64` | string | 仅当同时传 `returnBase64: true` 时出现 |
 
 #### 成功：Base64 JSON
@@ -203,6 +214,7 @@ HTTP 仍可能为 `200`；上游若依赖 `url`，请同时兼容 `base64` 或�
 | 403 | `PERMISSION_DENIED` | 缺少或错误的 `x-wb-c` |
 | 400 | `MISSING_URL` | 未传 `url` |
 | 400 | `INVALID_SOURCE` | `source` 传了非 `github` 的值 |
+| 400 | `INVALID_SELECTOR` | `selector` 为空或非法 |
 | 400 | `INVALID_URL` | URL 格式非法 |
 | 400 | `INVALID_PROTOCOL` | 非 http/https |
 | 403 | `DOMAIN_NOT_ALLOWED` | 目标域名不在白名单（服务端启用白名单时） |
@@ -245,6 +257,21 @@ curl -s -X POST http://wbscreenflow.zeabur.app/api/screenshot \
 ```
 
 成功且 About 配置了官网时，响应中 `source` 为 `"homepage"`；无官网或官网截图失败时回退仓库页截图，`source` 为 `"screenshot"`。
+
+### 5.1.2 X 帖子主帖截图（移动视口）
+
+```bash
+curl -s -X POST https://wbscreenflow.zeabur.app/api/screenshot \
+  -H "x-wb-c: 1024" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://x.com/user/status/1234567890",
+    "width": 390,
+    "height": 844
+  }'
+```
+
+未传 `selector` 时默认截主帖；成功时 `source` 为 `"element"`，失败降级时为 `"screenshot"` 并带 `warning`。
 
 ### 5.2 整页 + JPEG
 

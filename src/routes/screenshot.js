@@ -21,10 +21,18 @@ function mimeForFormat(format) {
 }
 
 function withSource(payload, result) {
+  const warnings = [payload.warning, result.warning].filter(Boolean);
+  const warning =
+    warnings.length === 0
+      ? undefined
+      : warnings.length === 1
+        ? warnings[0]
+        : warnings.join('；');
   return {
     ...payload,
     ...(result.source ? { source: result.source } : {}),
     ...(result.homepageUrl ? { homepageUrl: result.homepageUrl } : {}),
+    ...(warning ? { warning } : {}),
   };
 }
 
@@ -47,6 +55,9 @@ router.post('/screenshot', async (req, res, next) => {
       res.setHeader('Cache-Control', 'no-cache');
       if (result.source) {
         res.setHeader('X-Image-Source', result.source);
+      }
+      if (result.warning) {
+        res.setHeader('X-Image-Warning', result.warning.slice(0, 200));
       }
       return res.send(result.buffer);
     }

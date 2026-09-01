@@ -63,6 +63,10 @@ function validateScreenshotParams(body) {
     returnBase64: body.returnBase64 === true || body.returnBase64 === 'true',
     returnBinary: body.returnBinary === true || body.returnBinary === 'true',
     source: body.source ? String(body.source).toLowerCase() : undefined,
+    selector:
+      body.selector === undefined || body.selector === null
+        ? undefined
+        : String(body.selector),
   };
   
   // 验证 URL
@@ -70,6 +74,14 @@ function validateScreenshotParams(body) {
 
   if (params.source && params.source !== 'github') {
     throw new AppError('source 仅支持 github', 'INVALID_SOURCE', 400);
+  }
+
+  if (params.selector !== undefined) {
+    const trimmed = params.selector.trim();
+    if (!trimmed) {
+      throw new AppError('selector 不能为空', 'INVALID_SELECTOR', 400);
+    }
+    params.selector = trimmed;
   }
   
   // 验证视口尺寸

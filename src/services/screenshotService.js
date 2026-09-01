@@ -6,6 +6,7 @@ const config = require('../config/default');
 const { AppError } = require('../utils/errorHandler');
 const qiniuService = require('./qiniuService');
 const githubRepo = require('./githubRepo');
+const xPost = require('./xPost');
 
 class BrowserPool {
   constructor() {
@@ -106,6 +107,65 @@ async function attachQiniuUpload(result) {
 }
 
 /**
+ * 尽力关闭常见遮挡层（失败忽略）
+ */
+async function dismissBlockingOverlays(page) {
+  const candidates = [
+    '[aria-label="Close"]',
+    '[data-testid="xMigrationBottomBar"] [role="button"]',
+    'div[role="dialog"] [aria-label="Close"]',
+    'button[data-testid="confirmationSheetConfirm"]',
+  ];
+  for (const sel of candidates) {
+    try {
+      const el = await page.$(sel);
+      if (el) {
+        await el.click({ delay: 20 }).catch(() => {});
+        await el.dispose().catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+  }
+  // Best-effort text buttons
+  try {
+    await page.evaluate(() => {
+      const texts = ['Not now', 'Close', 'Dismiss', '拒绝', '关闭'];
+      const nodes = Array.from(document.querySelectorAll('button, div[role="button"], span[role="button"]'));
+      for (const node of nodes) {
+        const t = (node.textContent || '').trim();
+        if (texts.some((x) => t === x || t.includes(x))) {
+          node.click();
+          break;
+        }
+      }
+    });
+  } catch {
+    // ignore
+  }
+}
+
+function buildPageScreenshotOptions(params) {
+  const screenshotOptions = {
+    type: params.format,
+    fullPage: params.fullPage,
+  };
+  if (params.format.toLowerCase() === 'jpeg') {
+    screenshotOptions.quality = params.quality;
+  }
+  if (params.options && params.options.clip) {
+    screenshotOptions.clip = params.options.clip;
+  }
+  return screenshotOptions;
+}
+
+function attachBase64(result, params) {
+  if (!params.returnBase64) return;
+  const mimeType = params.format.toLowerCase() === 'jpeg' ? 'image/jpeg' : 'image/png';
+  result.base64 = `data:${mimeType};base64,${result.buffer.toString('base64')}`;
+}
+
+/**
  * 执行截图
  */
 async function takeScreenshot(params) {
@@ -126,51 +186,52 @@ async function takeScreenshot(params) {
     // 设置视口
     await page.setViewport(params.viewport);
     
-    // 设置用户代理（避免被识别为爬虫）
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
-    
-    // 访问页面
+    await page.setUserAgent(xPost.userAgentForUrl(params.url));
+
     await page.goto(params.url, {
       waitUntil: params.waitUntil,
       timeout: params.timeout,
     });
-    
-    // 构建截图选项
-    const screenshotOptions = {
-      type: params.format,
-      fullPage: params.fullPage,
-    };
-    
-    // JPEG 格式需要设置质量
-    if (params.format.toLowerCase() === 'jpeg') {
-      screenshotOptions.quality = params.quality;
+
+    const effectiveSelector = xPost.resolveSelector(params.url, params.selector);
+    let screenshot;
+    let source = 'screenshot';
+    let warning;
+
+    if (effectiveSelector) {
+      try {
+        await dismissBlockingOverlays(page);
+        await page.waitForSelector(effectiveSelector, { timeout: params.timeout });
+        const handle = await page.$(effectiveSelector);
+        if (!handle) {
+          throw new Error(`selector not found: ${effectiveSelector}`);
+        }
+        const elementOpts = { type: params.format };
+        if (params.format.toLowerCase() === 'jpeg') {
+          elementOpts.quality = params.quality;
+        }
+        screenshot = await handle.screenshot(elementOpts);
+        await handle.dispose().catch(() => {});
+        source = 'element';
+      } catch (elementError) {
+        console.warn('元素截图失败，降级整页:', elementError.message);
+        warning = `元素截图失败，已降级整页: ${elementError.message}`;
+        screenshot = await page.screenshot(buildPageScreenshotOptions(params));
+        source = 'screenshot';
+      }
+    } else {
+      screenshot = await page.screenshot(buildPageScreenshotOptions(params));
     }
-    
-    // 如果有裁剪选项，添加到配置中
-    if (params.options && params.options.clip) {
-      screenshotOptions.clip = params.options.clip;
-    }
-    
-    // 执行截图
-    const screenshot = await page.screenshot(screenshotOptions);
-    
+
     const result = {
       buffer: screenshot,
       format: params.format,
-      source: 'screenshot',
+      source,
+      ...(warning ? { warning } : {}),
     };
-    
-    // 如果需要返回 base64，进行转换
-    if (params.returnBase64) {
-      const base64 = screenshot.toString('base64');
-      const mimeType = params.format.toLowerCase() === 'jpeg' ? 'image/jpeg' : 'image/png';
-      result.base64 = `data:${mimeType};base64,${base64}`;
-    }
-    
+
+    attachBase64(result, params);
     await attachQiniuUpload(result);
-    
     return result;
   } catch (error) {
     if (error instanceof AppError) {
