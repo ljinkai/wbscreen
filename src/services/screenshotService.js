@@ -279,39 +279,27 @@ async function tryXEmbedScreenshot(page, params, { force = false } = {}) {
 }
 
 /**
- * 等待并返回可截图的主帖元素（先关弹层，再试多个选择器）
+ * 等待并返回可截图的主帖元素（先等 DOM 出现，再关弹层）
+ * 注意：不用 visible:true，避免被遮罩挡住时误判为不存在
  * @returns {Promise<import('puppeteer').ElementHandle>}
  */
 async function waitForTweetElement(page, params, candidates) {
-  const perTry = Math.max(5000, Math.floor(params.timeout / Math.max(candidates.length, 1)));
+  const timeout = params.timeout;
+  const sel = candidates[0] || 'ul > li:first-child article';
 
+  // 1) 只要求节点进入 DOM（attached），不要求当前可见
+  await page.waitForSelector(sel, { timeout, visible: false });
+
+  // 2) 关弹层后再取第一个主帖
   await dismissBlockingOverlays(page);
-  await new Promise((r) => setTimeout(r, 500));
+  await new Promise((r) => setTimeout(r, 400));
   await dismissBlockingOverlays(page);
 
-  let lastError;
-  for (const sel of candidates) {
-    try {
-      await page.waitForSelector(sel, { timeout: perTry, visible: true });
-      let handle = await page.$(sel);
-      if (!handle) continue;
-
-      // tweetText 时上溯到 article
-      if (sel.includes('tweetText')) {
-        const article = await page.evaluateHandle((el) => {
-          return el.closest('article') || el;
-        }, handle);
-        await handle.dispose().catch(() => {});
-        handle = article.asElement() || handle;
-      }
-
-      return handle;
-    } catch (err) {
-      lastError = err;
-    }
+  const handle = await page.$(sel);
+  if (!handle) {
+    throw new Error(`selector not found after dismiss: ${sel}`);
   }
-
-  throw lastError || new Error(`selectors not found: ${candidates.join(', ')}`);
+  return handle;
 }
 
 /**
