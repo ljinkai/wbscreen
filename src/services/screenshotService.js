@@ -107,19 +107,24 @@ async function attachQiniuUpload(result) {
 }
 
 /**
- * 尽力关闭常见遮挡层（失败忽略）
+ * 尽力关闭 / 隐藏常见遮挡层（失败忽略）
+ * 重点处理 X 移动端「See this post in the app」引导层
  */
 async function dismissBlockingOverlays(page) {
   const candidates = [
     '[aria-label="Close"]',
+    '[aria-label="close"]',
+    '[data-testid="app-bar-close"]',
+    '[data-testid="SheetClose"]',
     '[data-testid="xMigrationBottomBar"] [role="button"]',
     'div[role="dialog"] [aria-label="Close"]',
+    'div[role="dialog"] [aria-label="close"]',
     'button[data-testid="confirmationSheetConfirm"]',
   ];
   for (const sel of candidates) {
     try {
-      const el = await page.$(sel);
-      if (el) {
+      const els = await page.$$(sel);
+      for (const el of els) {
         await el.click({ delay: 20 }).catch(() => {});
         await el.dispose().catch(() => {});
       }
@@ -127,19 +132,77 @@ async function dismissBlockingOverlays(page) {
       // ignore
     }
   }
-  // Best-effort text buttons
+
+  try {
+    await page.keyboard.press('Escape').catch(() => {});
+  } catch {
+    // ignore
+  }
+
+  // Best-effort text buttons（不要点 Open X / Open app）
   try {
     await page.evaluate(() => {
-      const texts = ['Not now', 'Close', 'Dismiss', '拒绝', '关闭'];
-      const nodes = Array.from(document.querySelectorAll('button, div[role="button"], span[role="button"]'));
+      const dismissTexts = ['Not now', 'Not Now', 'Dismiss', 'No thanks', 'Maybe later', '拒绝', '关闭', '稍后再说'];
+      const avoidTexts = ['Open X', 'Open app', 'Open App', 'Log in', 'Sign up'];
+      const nodes = Array.from(
+        document.querySelectorAll('button, div[role="button"], span[role="button"], a[role="link"]')
+      );
       for (const node of nodes) {
         const t = (node.textContent || '').trim();
-        if (texts.some((x) => t === x || t.includes(x))) {
+        if (!t || t.length > 40) continue;
+        if (avoidTexts.some((x) => t === x || t.includes(x))) continue;
+        if (dismissTexts.some((x) => t === x)) {
           node.click();
           break;
         }
       }
     });
+  } catch {
+    // ignore
+  }
+
+  // 直接隐藏仍挡在主帖上的 sheet / dialog（点击关不掉时的兜底）
+  try {
+    await page.evaluate(() => {
+      const hide = (el) => {
+        if (!el || !(el instanceof HTMLElement)) return;
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
+      };
+
+      document.querySelectorAll('div[role="dialog"], div[data-testid="sheetDialog"], [data-testid="mask"]').forEach(hide);
+
+      // 「See this post in the app」类文案所在祖先层
+      const markers = ['See this post in the app', 'Open X', 'Use the app to view'];
+      const walk = Array.from(document.querySelectorAll('div, section, aside'));
+      for (const el of walk) {
+        const text = (el.textContent || '').trim();
+        if (!text || text.length > 280) continue;
+        if (markers.some((m) => text.includes(m)) && text.includes('Open X')) {
+          // 往上找较完整的遮罩容器
+          let cur = el;
+          for (let i = 0; i < 6 && cur; i++) {
+            const style = window.getComputedStyle(cur);
+            const fixed =
+              style.position === 'fixed' ||
+              style.position === 'absolute' ||
+              cur.getAttribute('role') === 'dialog';
+            if (fixed || (cur.clientHeight > window.innerHeight * 0.3 && cur.clientWidth > window.innerWidth * 0.5)) {
+              hide(cur);
+              break;
+            }
+            cur = cur.parentElement;
+          }
+        }
+      }
+    });
+  } catch {
+    // ignore
+  }
+
+  try {
+    await new Promise((r) => setTimeout(r, 250));
   } catch {
     // ignore
   }
@@ -200,8 +263,10 @@ async function takeScreenshot(params) {
 
     if (effectiveSelector) {
       try {
-        await dismissBlockingOverlays(page);
         await page.waitForSelector(effectiveSelector, { timeout: params.timeout });
+        // 弹层常在主帖出现后弹出；关闭两次提高成功率
+        await dismissBlockingOverlays(page);
+        await dismissBlockingOverlays(page);
         const handle = await page.$(effectiveSelector);
         if (!handle) {
           throw new Error(`selector not found: ${effectiveSelector}`);
@@ -216,6 +281,11 @@ async function takeScreenshot(params) {
       } catch (elementError) {
         console.warn('元素截图失败，降级整页:', elementError.message);
         warning = `元素截图失败，已降级整页: ${elementError.message}`;
+        try {
+          await dismissBlockingOverlays(page);
+        } catch {
+          // ignore
+        }
         screenshot = await page.screenshot(buildPageScreenshotOptions(params));
         source = 'screenshot';
       }
