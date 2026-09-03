@@ -214,6 +214,103 @@ async function dismissBlockingOverlays(page) {
   }
 }
 
+/**
+ * 隐藏 X 帖子页顶部 sticky/fixed 导航（Post / Log in / Sign up），避免压住正文首行
+ */
+async function hideXStickyChrome(page) {
+  try {
+    await page.evaluate(() => {
+      const hide = (el) => {
+        if (!el || !(el instanceof HTMLElement)) return;
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
+      };
+
+      const isTopBar = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        if (r.height > 140 || r.width < window.innerWidth * 0.45) return false;
+        if (r.top > 8 || r.bottom > 100) return false;
+        return s.position === 'fixed' || s.position === 'sticky';
+      };
+
+      document.querySelectorAll('header, nav, [role="banner"]').forEach((el) => {
+        if (isTopBar(el)) hide(el);
+      });
+
+      document.querySelectorAll('div, section').forEach((el) => {
+        if (!isTopBar(el)) return;
+        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (
+          text === 'Post' ||
+          text.includes('Log in') ||
+          text.includes('Sign up') ||
+          text.includes('Open app')
+        ) {
+          hide(el);
+        }
+      });
+    });
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 长帖展开 Show more（在目标元素子树内）
+ */
+async function expandLongPostContent(page, handle) {
+  try {
+    const expanded = await page.evaluate((root) => {
+      const labels = ['Show more', 'Read more', 'Show this thread', '显示更多', '阅读更多'];
+      const rootEl = root;
+      const showMoreLink = rootEl.querySelector('[data-testid="tweet-text-show-more-link"]');
+      if (showMoreLink) {
+        showMoreLink.click();
+        return true;
+      }
+      const nodes = rootEl.querySelectorAll('button, a, div[role="button"], span[role="button"]');
+      for (const node of nodes) {
+        const t = (node.textContent || '').trim();
+        if (!t || t.length > 48) continue;
+        if (labels.some((l) => t === l || t.startsWith(l))) {
+          node.click();
+          return true;
+        }
+      }
+      return false;
+    }, handle);
+    if (expanded) {
+      await new Promise((r) => setTimeout(r, 600));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 元素截图：X 帖先藏顶栏、展开长文，再截完整元素
+ */
+async function screenshotElementHandle(page, handle, params, { isXPost = false } = {}) {
+  if (isXPost) {
+    await hideXStickyChrome(page);
+    await expandLongPostContent(page, handle);
+    await hideXStickyChrome(page);
+    try {
+      await handle.evaluate((el) => {
+        el.scrollIntoView({ block: 'start', inline: 'nearest' });
+      });
+      await new Promise((r) => setTimeout(r, 300));
+    } catch {
+      // ignore
+    }
+  }
+
+  const buffer = await handle.screenshot(elementScreenshotOptions(params));
+  return buffer;
+}
+
 function buildPageScreenshotOptions(params) {
   const screenshotOptions = {
     type: params.format,
@@ -369,7 +466,8 @@ async function takeScreenshot(params) {
       const sels = candidates.length > 0 ? candidates : [effectiveSelector];
       try {
         const handle = await waitForTweetElement(page, params, sels);
-        screenshot = await handle.screenshot(elementScreenshotOptions(params));
+        const isXPost = xPost.isXStatusUrl(params.url);
+        screenshot = await screenshotElementHandle(page, handle, params, { isXPost });
         await handle.dispose().catch(() => {});
         source = 'element';
       } catch (elementError) {
@@ -398,6 +496,9 @@ async function takeScreenshot(params) {
 
         try {
           await dismissBlockingOverlays(page);
+          if (xPost.isXStatusUrl(params.url)) {
+            await hideXStickyChrome(page);
+          }
         } catch {
           // ignore
         }
@@ -406,6 +507,9 @@ async function takeScreenshot(params) {
         source = 'screenshot';
       }
     } else {
+      if (xPost.isXStatusUrl(params.url)) {
+        await hideXStickyChrome(page);
+      }
       screenshot = await page.screenshot(buildPageScreenshotOptions(params));
     }
 
