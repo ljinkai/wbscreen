@@ -52,6 +52,10 @@ module.exports = {
     domain: process.env.QINIU_DOMAIN || '', // 自定义域名，如 https://cdn.example.com
     zone: process.env.QINIU_ZONE || 'Zone_z0', // 存储区域
     autoUpload: process.env.QINIU_AUTO_UPLOAD !== 'false', // 是否自动上传
+    // 海外机房（如 Zeabur）建议开 CDN 上传域名，避免直连 up.qiniup.com 超时
+    useCdnDomain: process.env.QINIU_USE_CDN_DOMAIN !== 'false',
+    uploadTimeout: parseInt(process.env.QINIU_UPLOAD_TIMEOUT, 10) || 120000,
+    uploadRetries: parseInt(process.env.QINIU_UPLOAD_RETRIES, 10) || 3,
   },
 };
 

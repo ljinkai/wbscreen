@@ -17,6 +17,8 @@ function resolveQiniuZone() {
   const map = {
     Zone_z0: qiniu.zone.Zone_z0,
     z0: qiniu.zone.Zone_z0,
+    Zone_cn_east_2: qiniu.zone.Zone_cn_east_2,
+    cn_east_2: qiniu.zone.Zone_cn_east_2,
     Zone_z1: qiniu.zone.Zone_z1,
     z1: qiniu.zone.Zone_z1,
     Zone_z2: qiniu.zone.Zone_z2,
@@ -29,16 +31,19 @@ function resolveQiniuZone() {
   return map[raw] || qiniu.zone.Zone_z0;
 }
 
-function buildQiniuConfig() {
+/**
+ * @param {{ useCdnDomain?: boolean }} [opts]
+ */
+function buildQiniuConfig(opts = {}) {
   const qiniuConfig = new qiniu.conf.Config();
   qiniuConfig.zone = resolveQiniuZone();
   qiniuConfig.useHttpsDomain = true;
-  const timeout = parseInt(process.env.QINIU_UPLOAD_TIMEOUT, 10);
-  if (timeout > 0) {
-    qiniuConfig.RPC_TIMEOUT = timeout;
-  } else {
-    qiniuConfig.RPC_TIMEOUT = 120000;
-  }
+  // CDN 上传域名（upload*.qiniup.com）比源站 up*.qiniup.com 更适合跨境
+  qiniuConfig.useCdnDomain =
+    opts.useCdnDomain !== undefined
+      ? opts.useCdnDomain
+      : config.qiniu.useCdnDomain !== false;
+  qiniuConfig.RPC_TIMEOUT = config.qiniu.uploadTimeout || 120000;
   return qiniuConfig;
 }
 
@@ -99,9 +104,22 @@ function buildPublicUrl(key) {
   return `https://${config.qiniu.bucket}.qiniucdn.com/${key}`;
 }
 
+function errorMessage(err) {
+  if (!err) return '';
+  if (typeof err === 'string') return err;
+  if (err.message) return err.message;
+  if (err.errors && Array.isArray(err.errors)) {
+    return err.errors.map((e) => e?.message || String(e)).join('; ');
+  }
+  return String(err);
+}
+
 function isRetryableUploadError(err) {
-  const msg = (err && err.message) || String(err || '');
-  return /socket hang up|ECONNRESET|ETIMEDOUT|Response timeout|callback twice/i.test(msg);
+  const msg = errorMessage(err);
+  const code = err?.code || err?.errno || '';
+  return /socket hang up|ECONNRESET|ETIMEDOUT|ENETUNREACH|EAI_AGAIN|Response timeout|callback twice|AggregateError/i.test(
+    `${msg} ${code}`
+  );
 }
 
 /**
@@ -135,17 +153,44 @@ function putOnce(uploadToken, key, buffer, qiniuConfig) {
   });
 }
 
-async function putWithRetry(uploadToken, key, buffer, qiniuConfig) {
-  try {
-    return await putOnce(uploadToken, key, buffer, qiniuConfig);
-  } catch (firstErr) {
-    if (!isRetryableUploadError(firstErr)) {
-      throw firstErr;
+/**
+ * 先走 CDN 上传域名，再回退源站；每次失败可重试
+ */
+async function putWithRetry(uploadToken, key, buffer) {
+  const retries = Math.max(1, config.qiniu.uploadRetries || 3);
+  const strategies = [
+    { useCdnDomain: true, label: 'CDN(upload*.qiniup.com)' },
+    { useCdnDomain: false, label: '源站(up*.qiniup.com)' },
+  ];
+
+  // 若配置强制关闭 CDN，只走源站
+  const plan =
+    config.qiniu.useCdnDomain === false
+      ? [{ useCdnDomain: false, label: '源站(up*.qiniup.com)' }]
+      : strategies;
+
+  let lastError;
+  for (const strategy of plan) {
+    const qiniuConfig = buildQiniuConfig({ useCdnDomain: strategy.useCdnDomain });
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        return await putOnce(uploadToken, key, buffer, qiniuConfig);
+      } catch (err) {
+        lastError = err;
+        const msg = errorMessage(err);
+        console.warn(
+          `七牛上传失败 [${strategy.label}] 第${attempt}/${retries}次:`,
+          msg
+        );
+        if (!isRetryableUploadError(err) || attempt === retries) {
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 800 * attempt));
+      }
     }
-    console.warn('七牛上传失败，1s 后重试:', firstErr.message);
-    await new Promise((r) => setTimeout(r, 1000));
-    return await putOnce(uploadToken, key, buffer, qiniuConfig);
   }
+
+  throw lastError || new Error('七牛上传失败');
 }
 
 /**
@@ -156,13 +201,16 @@ async function uploadToQiniu(buffer, format) {
     try {
       const uploadToken = generateUploadToken();
       const key = generateFileName(format);
-      const qiniuConfig = buildQiniuConfig();
-      return await putWithRetry(uploadToken, key, buffer, qiniuConfig);
+      return await putWithRetry(uploadToken, key, buffer);
     } catch (error) {
       if (error instanceof AppError) {
         throw error;
       }
-      throw new AppError(`上传到七牛云失败: ${error.message}`, 'QINIU_UPLOAD_ERROR', 500);
+      throw new AppError(
+        `上传到七牛云失败: ${errorMessage(error)}`,
+        'QINIU_UPLOAD_ERROR',
+        500
+      );
     }
   };
 
@@ -176,4 +224,5 @@ module.exports = {
   generateUploadToken,
   resolveQiniuZone,
   buildPublicUrl,
+  buildQiniuConfig,
 };
