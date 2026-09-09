@@ -8,6 +8,7 @@ const qiniuService = require('./qiniuService');
 const githubRepo = require('./githubRepo');
 const xPost = require('./xPost');
 const xEmbed = require('./xEmbed');
+const { applyTextWatermark } = require('./watermark');
 
 /** 暂时关闭 X 官方 embed 优先；元素失败后仍可作回退 */
 const X_EMBED_ENABLED = false;
@@ -331,6 +332,28 @@ function attachBase64(result, params) {
   result.base64 = `data:${mimeType};base64,${result.buffer.toString('base64')}`;
 }
 
+/**
+ * 可选水印 → base64 → 七牛上传
+ */
+async function finalizeScreenshotResult(browser, buffer, params, extra = {}) {
+  let out = buffer;
+  if (params.watermark && params.watermark.enabled && browser) {
+    try {
+      out = await applyTextWatermark(browser, out, params.watermark, params.format);
+    } catch (error) {
+      console.warn('加水印失败，使用原图:', error.message);
+    }
+  }
+  const result = {
+    buffer: out,
+    format: params.format,
+    ...extra,
+  };
+  attachBase64(result, params);
+  await attachQiniuUpload(result);
+  return result;
+}
+
 function elementScreenshotOptions(params) {
   const elementOpts = { type: params.format };
   if (params.format.toLowerCase() === 'jpeg') {
@@ -428,14 +451,9 @@ async function takeScreenshot(params) {
     try {
       const embedResult = await tryXEmbedScreenshot(page, params);
       if (embedResult) {
-        const result = {
-          buffer: embedResult.buffer,
-          format: params.format,
+        return finalizeScreenshotResult(browser, embedResult.buffer, params, {
           source: embedResult.source,
-        };
-        attachBase64(result, params);
-        await attachQiniuUpload(result);
-        return result;
+        });
       }
     } catch (embedError) {
       console.warn('X embed 截图失败，回退帖子页:', embedError.message);
@@ -479,15 +497,10 @@ async function takeScreenshot(params) {
         try {
           const embedFallback = await tryXEmbedScreenshot(page, params, { force: true });
           if (embedFallback) {
-            const result = {
-              buffer: embedFallback.buffer,
-              format: params.format,
+            return finalizeScreenshotResult(browser, embedFallback.buffer, params, {
               source: embedFallback.source,
               warning: `${warning}；已回退 embed`,
-            };
-            attachBase64(result, params);
-            await attachQiniuUpload(result);
-            return result;
+            });
           }
         } catch (embedFbError) {
           console.warn('X embed 回退也失败:', embedFbError.message);
@@ -513,15 +526,10 @@ async function takeScreenshot(params) {
       screenshot = await page.screenshot(buildPageScreenshotOptions(params));
     }
 
-    const result = {
-      buffer: screenshot,
-      format: params.format,
+    const result = await finalizeScreenshotResult(browser, screenshot, params, {
       source,
       ...(warning ? { warning } : {}),
-    };
-
-    attachBase64(result, params);
-    await attachQiniuUpload(result);
+    });
     return result;
   } catch (error) {
     if (error instanceof AppError) {

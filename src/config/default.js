@@ -30,6 +30,13 @@ module.exports = {
     waitUntil: 'networkidle0',
     timeout: 30000,
   },
+
+  // 水印配置：普通截图默认关闭；source=github 的请求默认开启，可通过请求参数覆盖
+  watermark: {
+    text: process.env.WATERMARK_TEXT || 'ezindie.com',
+    position: process.env.WATERMARK_POSITION || 'bottom-right',
+    opacity: parseFloat(process.env.WATERMARK_OPACITY) || 0.72,
+  },
   
   // 安全配置
   security: {
@@ -58,4 +65,3 @@ module.exports = {
     uploadRetries: parseInt(process.env.QINIU_UPLOAD_RETRIES, 10) || 3,
   },
 };
-

@@ -86,6 +86,17 @@ curl -s http://wbscreenflow.zeabur.app/api/health \
 | `returnBinary` | boolean | 否 | `false` | `true` 时直接返回图片二进制 |
 | `viewport` | object | 否 | `{}` | 细粒度视口，见下表 |
 | `options` | object | 否 | `{}` | 预留扩展字段，当前可忽略 |
+| `watermark` | boolean / object | 否 | 见下 | 是否加水印；也可传 `{ enabled, text, position, opacity }` |
+| `watermarkText` | string | 否 | `ezindie.com` | 水印文案 |
+| `watermarkPosition` | string | 否 | `bottom-right` | `bottom-right` / `bottom-left` / `top-right` / `top-left` |
+| `watermarkOpacity` | number | 否 | `0.72` | 0–1 |
+
+### 3.1.0 水印默认规则
+
+- **普通截图**（未传 `source`）：默认 **不** 加水印  
+- **`source: "github"`**：默认 **加水印**（右下角 `ezindie.com`）  
+- 请求里显式传 `watermark: true|false`（或 `watermark.enabled`）可覆盖默认  
+
 
 ### 3.1.1 GitHub About 官网优先（`source: "github"`）
 
