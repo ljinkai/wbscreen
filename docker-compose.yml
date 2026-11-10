@@ -16,8 +16,9 @@ services:
       - PUPPETEER_HEADLESS=true
       - PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox
       # 性能配置
-      - MAX_CONCURRENT_REQUESTS=5
-      - BROWSER_POOL_SIZE=3
+      - MAX_CONCURRENT_REQUESTS=2
+      - BROWSER_POOL_SIZE=1
+      - BROWSER_IDLE_TIMEOUT_MS=30000
       - REQUEST_TIMEOUT=30000
       # 七牛云配置（从 .env 文件读取，或在这里设置）
       - QINIU_ACCESS_KEY=${QINIU_ACCESS_KEY:-}

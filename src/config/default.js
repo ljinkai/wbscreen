@@ -1,3 +1,8 @@
+function integerEnv(name, fallback, min = 1) {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value >= min ? value : fallback;
+}
+
 /**
  * 默认配置
  */
@@ -15,9 +20,10 @@ module.exports = {
   
   // 性能配置
   performance: {
-    maxConcurrentRequests: parseInt(process.env.MAX_CONCURRENT_REQUESTS) || 5,
-    browserPoolSize: parseInt(process.env.BROWSER_POOL_SIZE) || 3,
-    requestTimeout: parseInt(process.env.REQUEST_TIMEOUT) || 30000,
+    maxConcurrentRequests: integerEnv('MAX_CONCURRENT_REQUESTS', 2),
+    browserIdleTimeout: integerEnv('BROWSER_IDLE_TIMEOUT_MS', 30000, 0),
+    browserPoolSize: integerEnv('BROWSER_POOL_SIZE', 1),
+    requestTimeout: integerEnv('REQUEST_TIMEOUT', 30000),
   },
   
   // 默认截图配置

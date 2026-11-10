@@ -96,8 +96,9 @@ docker-compose down
 - `PORT`: 服务端口（默认 3000）
 - `PUPPETEER_HEADLESS`: 是否无头模式（默认 true）
 - `PUPPETEER_ARGS`: Puppeteer 启动参数
-- `MAX_CONCURRENT_REQUESTS`: 最大并发请求数（默认 5）
-- `BROWSER_POOL_SIZE`: 浏览器池大小（默认 3）
+- `MAX_CONCURRENT_REQUESTS`: 最大并发请求数（默认 2）
+- `BROWSER_POOL_SIZE`: 浏览器池大小（默认 1）
+- `BROWSER_IDLE_TIMEOUT_MS`: 浏览器空闲关闭延迟（默认 30000 毫秒，0 表示归还后立即关闭）
 - `REQUEST_TIMEOUT`: 请求超时时间（默认 30000）
 - `QINIU_DOMAIN`: 七牛云自定义域名
 - `QINIU_ZONE`: 七牛云存储区域（默认 Zone_z0）

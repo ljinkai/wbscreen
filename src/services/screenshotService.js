@@ -15,83 +15,16 @@ const X_EMBED_ENABLED = false;
 /** 帖子页元素截图失败时，再试一次 embed（不依赖打开 x.com 主站 DOM） */
 const X_EMBED_FALLBACK = true;
 
-class BrowserPool {
-  constructor() {
-    this.browsers = [];
-    this.maxSize = config.performance.browserPoolSize;
-    this.currentSize = 0;
-  }
-  
-  /**
-   * 获取浏览器实例
-   */
-  async getBrowser() {
-    // 如果池中有可用的浏览器，直接返回
-    if (this.browsers.length > 0) {
-      return this.browsers.pop();
-    }
-    
-    // 如果未达到最大数量，创建新实例
-    if (this.currentSize < this.maxSize) {
-      this.currentSize++;
-      return await this.createBrowser();
-    }
-    
-    // 等待其他请求释放浏览器
-    return new Promise((resolve) => {
-      const checkInterval = setInterval(() => {
-        if (this.browsers.length > 0) {
-          clearInterval(checkInterval);
-          resolve(this.browsers.pop());
-        }
-      }, 100);
-    });
-  }
-  
-  /**
-   * 创建浏览器实例
-   */
-  async createBrowser() {
-    try {
-      const browser = await puppeteer.launch({
-        headless: config.puppeteer.headless,
-        args: config.puppeteer.args,
-      });
-      
-      // 监听浏览器断开事件
-      browser.on('disconnected', () => {
-        this.currentSize = Math.max(0, this.currentSize - 1);
-      });
-      
-      return browser;
-    } catch (error) {
-      this.currentSize = Math.max(0, this.currentSize - 1);
-      throw new AppError(`创建浏览器实例失败: ${error.message}`, 'BROWSER_CREATE_ERROR', 500);
-    }
-  }
-  
-  /**
-   * 释放浏览器实例回池
-   */
-  releaseBrowser(browser) {
-    if (browser && browser.isConnected()) {
-      this.browsers.push(browser);
-    }
-  }
-  
-  /**
-   * 关闭所有浏览器实例
-   */
-  async closeAll() {
-    const closePromises = this.browsers.map(browser => browser.close());
-    await Promise.all(closePromises);
-    this.browsers = [];
-    this.currentSize = 0;
-  }
-}
-
-// 创建全局浏览器池实例
-const browserPool = new BrowserPool();
+const BrowserPool = require('./browserPool');
+const browserPool = new BrowserPool({
+  launch: () => puppeteer.launch({
+    headless: config.puppeteer.headless,
+    args: config.puppeteer.args,
+  }),
+  maxSize: config.performance.browserPoolSize,
+  idleTimeout: config.performance.browserIdleTimeout,
+  waitTimeout: config.performance.requestTimeout,
+});
 
 // 并发控制
 let activeRequests = 0;
@@ -434,11 +367,13 @@ async function takeScreenshot(params) {
   activeRequests++;
   let browser = null;
   let page = null;
+  let context = null;
   
   try {
     // 获取浏览器实例
     browser = await browserPool.getBrowser();
-    page = await browser.newPage();
+    context = await browser.createBrowserContext();
+    page = await context.newPage();
     
     // 设置视口
     await page.setViewport(params.viewport);
@@ -451,7 +386,7 @@ async function takeScreenshot(params) {
     try {
       const embedResult = await tryXEmbedScreenshot(page, params);
       if (embedResult) {
-        return finalizeScreenshotResult(browser, embedResult.buffer, params, {
+        return await finalizeScreenshotResult(context, embedResult.buffer, params, {
           source: embedResult.source,
         });
       }
@@ -497,7 +432,7 @@ async function takeScreenshot(params) {
         try {
           const embedFallback = await tryXEmbedScreenshot(page, params, { force: true });
           if (embedFallback) {
-            return finalizeScreenshotResult(browser, embedFallback.buffer, params, {
+            return await finalizeScreenshotResult(context, embedFallback.buffer, params, {
               source: embedFallback.source,
               warning: `${warning}；已回退 embed`,
             });
@@ -526,7 +461,7 @@ async function takeScreenshot(params) {
       screenshot = await page.screenshot(buildPageScreenshotOptions(params));
     }
 
-    const result = await finalizeScreenshotResult(browser, screenshot, params, {
+    const result = await finalizeScreenshotResult(context, screenshot, params, {
       source,
       ...(warning ? { warning } : {}),
     });
@@ -547,20 +482,17 @@ async function takeScreenshot(params) {
     
     throw new AppError(`截图失败: ${error.message}`, 'SCREENSHOT_ERROR', 500);
   } finally {
-    // 清理资源
-    if (page) {
-      try {
-        await page.close();
-      } catch (error) {
-        console.error('关闭页面失败:', error);
+    // Close the entire request context, including watermark pages and site-created popups.
+    let discard = false;
+    if (context) {
+      try { await context.close(); }
+      catch (error) {
+        discard = true;
+        console.error('关闭浏览器 context 失败:', error.message);
       }
     }
-    
-    // 释放浏览器实例
-    if (browser) {
-      browserPool.releaseBrowser(browser);
-    }
-    
+    if (browser) await browserPool.releaseBrowser(browser, { discard });
+
     activeRequests--;
   }
 }

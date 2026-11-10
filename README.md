@@ -248,8 +248,9 @@ PUPPETEER_HEADLESS=true
 PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox
 
 # 性能配置
-MAX_CONCURRENT_REQUESTS=5
-BROWSER_POOL_SIZE=3
+MAX_CONCURRENT_REQUESTS=2
+BROWSER_POOL_SIZE=1
+BROWSER_IDLE_TIMEOUT_MS=30000
 REQUEST_TIMEOUT=30000
 
 # 安全配置（可选）
@@ -353,3 +354,16 @@ wbscreen/
 
 MIT
 
+
+### 低频截图与内存占用
+
+浏览器按需启动，默认最多 1 个实例、最多接收 2 个截图请求（含等待中的请求）；超过并发上限返回 503。
+每个请求创建独立 BrowserContext，截图和水印处理完成后销毁 context，清理页面、弹窗及站点缓存。
+浏览器空闲 30 秒后关闭，下次请求会重新启动 Chromium，因此首个请求会增加启动耗时。
+设置 `BROWSER_IDLE_TIMEOUT_MS=0` 可在每次归还后尽快关闭浏览器，适合每天仅少量截图的场景。
+`REQUEST_TIMEOUT` 限制等待池中浏览器的时间；页面加载超时仍由截图请求参数控制。
+已有 Railway 环境变量会覆盖代码默认值；低频部署建议设置 `BROWSER_POOL_SIZE=1`、`MAX_CONCURRENT_REQUESTS=2` 和 `BROWSER_IDLE_TIMEOUT_MS=30000`。
+
+部署后应比较容器整体内存（包括 Chromium 子进程）：重启后、截图前后、最后一次截图完成 30 秒后，
+并验证页面导航失败后内存也能回落。Node.js 的 RSS 不包含 Chromium，不能单独用它判断是否释放。
+本项目没有内置定时采集调度器；本次代码调整不启用 Railway Serverless，也不修改其他服务的调度。
